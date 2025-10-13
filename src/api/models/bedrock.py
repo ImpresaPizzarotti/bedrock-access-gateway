@@ -93,8 +93,7 @@ SUPPORTED_BEDROCK_EMBEDDING_MODELS = {
 
 ENCODER = tiktoken.get_encoding("cl100k_base")
 
-
-def list_bedrock_models() -> dict:
+def list_bedrock_models(model_regex_filter: str = None) -> dict:
     """Automatically getting a list of supported models.
 
     Returns a model list combines:
@@ -112,6 +111,7 @@ def list_bedrock_models() -> dict:
             # List system defined inference profile IDs
             paginator = bedrock_client.get_paginator('list_inference_profiles')
             for page in paginator.paginate(maxResults=1000, typeEquals="SYSTEM_DEFINED"):
+                logger.info("Total System Inference Profiles extracted: %s", len(page["inferenceProfileSummaries"]))
                 for p in page["inferenceProfileSummaries"]:
                     profile_dict[p["inferenceProfileId"]] = {
                         "id": p["inferenceProfileId"], "name": p["inferenceProfileName"]}
@@ -120,7 +120,8 @@ def list_bedrock_models() -> dict:
             # List application defined inference profile IDs and create mapping
             paginator = bedrock_client.get_paginator('list_inference_profiles')
             for page in paginator.paginate(maxResults=1000, typeEquals="APPLICATION"):
-                logger.info("Application Inference Profile: %s", json.dumps(page, default=str))
+                logger.debug("Application Inference Profile: %s", json.dumps(page, default=str))
+                logger.info("Total Application Inference Profiles extracted: %s", len(page["inferenceProfileSummaries"]))
                 for profile in page["inferenceProfileSummaries"]:
                     try:
                         profile_arn = profile.get("inferenceProfileArn")
@@ -141,7 +142,6 @@ def list_bedrock_models() -> dict:
                                         "name": profile_name
                                     })
                     except Exception as e:
-                        logger.warning("App profiles created now %s", json.dumps(app_profiles_by_model, default=str))
                         logger.warning(
                             f"Error processing application profile: {e}")
                         continue
@@ -189,28 +189,33 @@ def list_bedrock_models() -> dict:
         # In case stack not updated.
         model_list[DEFAULT_MODEL] = {"modalities": ["TEXT", "IMAGE"]}
 
-    # if INFERENCE_PROFILE_REGEX_FILTER != "":
-    #     # filter list keeping only models that pass the regex test with INFERENCE_PROFILE_REGEX_FILTER
-    #     regex = re.compile(INFERENCE_PROFILE_REGEX_FILTER)
-    #     tmp_list = {}
-    #     for model in model_list:
-    #         if model.
-    #     model_list = {model: model_list[model] for model in tmp_list}
+    if model_regex_filter != None:
+        # Filter list on model's names or model id in case missing
+        logger.info("Filtering models by regex: %s", model_regex_filter)
+        regex = re.compile(model_regex_filter)
+        tmp_list = {}
+        for model in model_list:
+            model_name = model_list[model].get("name", model)
+            if regex.match(model_name) or regex.match(model):
+                logger.debug("Model %s matches regex filter %s", model_name, model_regex_filter)
+                tmp_list[model] = model_list[model]
+        model_list = tmp_list
 
     # Print all the models objects in the list
-    logger.info("Supported models: %s", json.dumps(model_list))
+    logger.debug("Supported models: %s", json.dumps(model_list))
+    logger.info("Total supported models: %s", len(model_list))
     return model_list
 
 
 # Initialize the model list.
-bedrock_model_list = list_bedrock_models()
+bedrock_model_list = list_bedrock_models(model_regex_filter=INFERENCE_PROFILE_REGEX_FILTER)
 
 
 class BedrockModel(BaseChatModel):
     def list_models(self) -> dict:
         """Always refresh the latest model list"""
         global bedrock_model_list
-        bedrock_model_list = list_bedrock_models()
+        bedrock_model_list = list_bedrock_models(model_regex_filter=INFERENCE_PROFILE_REGEX_FILTER)
         logger.info("Model list refreshed")
         return bedrock_model_list
 
@@ -912,8 +917,7 @@ class BedrockEmbeddingsModel(BaseEmbeddingsModel, ABC):
     def _invoke_model(self, args: dict, model_id: str):
         body = json.dumps(args)
 
-        # TODO put back into debug
-        logger.info("Invoke Bedrock Model: " + model_id)
+        logger.debug("Invoke Bedrock Model: " + model_id)
         logger.debug("Bedrock request body: " + body)
         try:
             return bedrock_runtime.invoke_model(
