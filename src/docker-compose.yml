@@ -12,6 +12,7 @@ services:
       - AWS_REGION=${AWS_REGION:-eu-west-1}
       - ENABLE_APPLICATION_INFERENCE_PROFILES=true
       # - LOG_LEVEL=debug
+      - API_KEY=bedrock
       - PORT=8080
     container_name: bedrock-access-gateway
     restart: unless-stopped
