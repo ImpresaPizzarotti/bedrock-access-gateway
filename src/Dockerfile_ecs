@@ -5,9 +5,10 @@ RUN groupadd -r appuser && useradd -r -g appuser appuser
 
 WORKDIR /app
 
-# Install security updates and clean up
+# Install security updates and build dependencies, then clean up
 RUN apt-get update && \
     apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends build-essential gcc g++ && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -38,5 +39,6 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
 # Expose port
 EXPOSE ${PORT}
 
+CMD ["sh", "-c", "uvicorn api.app:app --host 0.0.0.0 --port ${PORT}"]
 # Use entrypoint script (recommended)
-ENTRYPOINT ["/app/entrypoint.sh"]
+# ENTRYPOINT ["/app/entrypoint.sh"]

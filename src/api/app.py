@@ -7,6 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from mangum import Mangum
+from api.tracing import setup_tracing, instrument_fastapi
 
 from api.routers import chat, embeddings, model
 from api.setting import API_ROUTE_PREFIX, DESCRIPTION, SUMMARY, TITLE, VERSION, LOG_LEVEL
@@ -40,7 +41,9 @@ for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
     logger.setLevel(LOG_LEVEL)
     logger.propagate = False
 
+setup_tracing()
 app = FastAPI(**config)
+instrument_fastapi(app)
 
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
 origins_list = [origin.strip() for origin in allowed_origins.split(",")] if allowed_origins != "*" else ["*"]

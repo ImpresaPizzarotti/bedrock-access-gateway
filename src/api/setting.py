@@ -16,3 +16,10 @@ DEFAULT_EMBEDDING_MODEL = os.environ.get("DEFAULT_EMBEDDING_MODEL", "cohere.embe
 ENABLE_CROSS_REGION_INFERENCE = os.environ.get("ENABLE_CROSS_REGION_INFERENCE", "true").lower() != "false"
 ENABLE_APPLICATION_INFERENCE_PROFILES = os.environ.get("ENABLE_APPLICATION_INFERENCE_PROFILES", "true").lower() != "false"
 INFERENCE_PROFILE_REGEX_FILTER = os.environ.get("INFERENCE_PROFILE_REGEX_FILTER", "")
+
+# Open Telemetry Settings
+ENABLE_TRACING = os.environ.get("ENABLE_TRACING", "false").lower() == "true"
+OTEL_EXPORTER_OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
+OTEL_SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "bedrock-access-gateway")
+OTEL_TRACES_SAMPLER = os.environ.get("OTEL_TRACES_SAMPLER", "traceidratio")
+OTEL_TRACES_SAMPLER_ARG = float(os.environ.get("OTEL_TRACES_SAMPLER_ARG", "0.3"))

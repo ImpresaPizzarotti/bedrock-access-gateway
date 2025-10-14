@@ -8,6 +8,10 @@ services:
     volumes:
       - ${USERPROFILE}\.aws:/home/appuser/.aws:ro
     environment:
+      # Tracing
+      - ENABLE_TRACING=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=bedrock-access-gateway
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-eu-west-1}
       - ENABLE_APPLICATION_INFERENCE_PROFILES=true
@@ -42,5 +46,15 @@ services:
     depends_on:
       - bedrock-access-gateway
 
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "8082:16686"  # Jaeger UI
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    container_name: jaeger
+    restart: unless-stopped
 # volumes:
 #   open-webui:
