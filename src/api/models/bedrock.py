@@ -82,30 +82,37 @@ def get_inference_region_prefix():
 # https://docs.aws.amazon.com/bedrock/latest/userguide/inference-profiles-support.html
 cr_inference_prefix = get_inference_region_prefix()
 
-SUPPORTED_BEDROCK_EMBEDDING_MODELS = {
-    "cohere.embed-multilingual-v3": "Cohere Embed Multilingual",
-    "cohere.embed-english-v3": "Cohere Embed English",
-    "amazon.titan-embed-text-v1": "Titan Embeddings G1 - Text",
-    "amazon.titan-embed-text-v2:0": "Titan Embeddings G2 - Text",
-    # Disable Titan embedding.
-    # "amazon.titan-embed-image-v1": "Titan Multimodal Embeddings G1"
-}
+# SUPPORTED_BEDROCK_EMBEDDING_MODELS = {
+#     "cohere.embed-multilingual-v3": "Cohere Embed Multilingual",
+#     "cohere.embed-english-v3": "Cohere Embed English",
+#     "amazon.titan-embed-text-v1": "Titan Embeddings G1 - Text",
+#     "amazon.titan-embed-text-v2:0": "Titan Embeddings G2 - Text",
+#     # Disable Titan embedding.
+#     # "amazon.titan-embed-image-v1": "Titan Multimodal Embeddings G1"
+# }
 
 ENCODER = tiktoken.get_encoding("cl100k_base")
 
-def list_bedrock_models(model_regex_filter: str = None) -> dict:
+def list_bedrock_models(model_regex_filter: str = None, output_modality: str = "TEXT") -> dict:
     """Automatically getting a list of supported models.
-
+    
+    Args:
+        model_regex_filter (str, optional): regex filter that will be used to filter models before returning them. Defaults to None.
+        output_modality (str, optional): whether to return only "EMBEDDING" or "TEXT" output models. Defaults to "TEXT".
+        
     Returns a model list combines:
         - ON_DEMAND models.
         - Cross-Region Inference Profiles (if enabled via Env)
         - Application Inference Profiles (if enabled via Env)
     """
     model_list = {}
+    output_modality = output_modality.upper()
     try:
         profile_dict = {}
         # Map foundation model_id -> list of application inference profiles ARN and Name
         app_profiles_by_model = defaultdict(list)
+        
+        logger.info("Listing Bedrock Models. Regex Filter: %s, Output Modality: %s", model_regex_filter, output_modality)
 
         if ENABLE_CROSS_REGION_INFERENCE:
             # List system defined inference profile IDs
@@ -113,8 +120,12 @@ def list_bedrock_models(model_regex_filter: str = None) -> dict:
             for page in paginator.paginate(maxResults=1000, typeEquals="SYSTEM_DEFINED"):
                 logger.info("Total System Inference Profiles extracted: %s", len(page["inferenceProfileSummaries"]))
                 for p in page["inferenceProfileSummaries"]:
+                    if output_modality == "EMBEDDING" and "embed" not in p["inferenceProfileName"]:
+                        continue
                     profile_dict[p["inferenceProfileId"]] = {
-                        "id": p["inferenceProfileId"], "name": p["inferenceProfileName"]}
+                        "id": p["inferenceProfileId"],
+                        "name": p["inferenceProfileName"]
+                    }
 
         if ENABLE_APPLICATION_INFERENCE_PROFILES:
             # List application defined inference profile IDs and create mapping
@@ -128,7 +139,10 @@ def list_bedrock_models(model_regex_filter: str = None) -> dict:
                         profile_name = profile.get("inferenceProfileName")
                         if not profile_arn:
                             continue
-
+                        
+                        if output_modality == "EMBEDDING" and "embed" not in profile_name.lower():
+                            continue
+                    
                         # Process all models in the profile
                         models = profile.get("models", [])
                         for model in models:
@@ -147,15 +161,15 @@ def list_bedrock_models(model_regex_filter: str = None) -> dict:
                         continue
 
         # List foundation models, only cares about text outputs here.
-        response = bedrock_client.list_foundation_models(
-            byOutputModality="TEXT")
+        response = bedrock_client.list_foundation_models(byOutputModality=output_modality)
+            
         for model in response["modelSummaries"]:
             model_id = model.get("modelId", "N/A")
             stream_supported = model.get("responseStreamingSupported", True)
             status = model["modelLifecycle"].get("status", "ACTIVE")
 
             # currently, use this to filter out rerank models and legacy models
-            if not stream_supported or status not in ["ACTIVE", "LEGACY"]:
+            if output_modality != "EMBEDDING" and not stream_supported or status not in ["ACTIVE", "LEGACY"]:
                 continue
 
             inference_types = model.get("inferenceTypesSupported", [])
@@ -217,7 +231,7 @@ def list_bedrock_models(model_regex_filter: str = None) -> dict:
 
 # Initialize the model list.
 bedrock_model_list = list_bedrock_models(model_regex_filter=INFERENCE_PROFILE_REGEX_FILTER)
-
+bedrock_embedding_model_list = list_bedrock_models(model_regex_filter=INFERENCE_PROFILE_REGEX_FILTER, output_modality="EMBEDDING")
 
 class BedrockModel(BaseChatModel):
     def list_models(self) -> dict:
@@ -1084,17 +1098,18 @@ class TitanEmbeddingsModel(BedrockEmbeddingsModel):
 
 
 def get_embeddings_model(model_id: str) -> BedrockEmbeddingsModel:
-    model_name = SUPPORTED_BEDROCK_EMBEDDING_MODELS.get(model_id, "")
-
-    logger.debug("model name is " + model_name)
-    match model_name:
-        case "Cohere Embed Multilingual" | "Cohere Embed English":
+    logger.debug("Supported embedding models %s", json.dumps(bedrock_embedding_model_list))
+    # supported_models = list_bedrock_models(model_regex_filter=INFERENCE_PROFILE_REGEX_FILTER,output_modality="EMBEDDING")
+    model = bedrock_embedding_model_list.get(model_id, None)
+    if model:
+        model_name = model["name"].lower()
+        if "cohere" in model_name:
             return CohereEmbeddingsModel()
-        case "Titan Embeddings G2 - Text":
+        elif "titan" in model_name:
             return TitanEmbeddingsModel()
-        case _:
-            logger.error("Unsupported model id " + model_id)
-            raise HTTPException(
-                status_code=400,
-                detail="Unsupported embedding model id " + model_id,
-            )
+    
+    logger.error("Unsupported model id " + model_id)
+    raise HTTPException(
+        status_code=400,
+        detail="Unsupported embedding model id " + model_id,
+    )
