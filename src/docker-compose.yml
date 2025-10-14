@@ -11,6 +11,7 @@ services:
       - AWS_PROFILE=${AWS_PROFILE:-default}
       - AWS_REGION=${AWS_REGION:-eu-west-1}
       - ENABLE_APPLICATION_INFERENCE_PROFILES=true
+      - INFERENCE_PROFILE_REGEX_FILTER=^paip-dev.*
       # - LOG_LEVEL=debug
       - API_KEY=bedrock
       - PORT=8080
@@ -26,6 +27,10 @@ services:
     environment:
       - OPENAI_API_BASE_URL=http://bedrock-access-gateway:8080/api/v1
       - OPENAI_API_KEY=bedrock
+      - RAG_OPENAI_API_BASE_URL=http://bedrock-access-gateway:8080/api/v1
+      - RAG_OPENAI_API_KEY=bedrock
+      - RAG_EMBEDDING_ENGINE=openai
+      - RAG_EMBEDDING_MODEL=arn:aws:bedrock:eu-west-1:487962084333:application-inference-profile/cadogiby4o5b
       - WEBUI_AUTH=False
       - OFFLINE_MODE=True
       - DATABASE_POOL_SIZE="20"
