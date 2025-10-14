@@ -1,7 +1,7 @@
 import logging
 import os
-
-import uvicorn, os
+import sys
+import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,8 +22,24 @@ config = {
 logging.basicConfig(
     # level=logging.INFO,
     level = LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
+
+# Configure uvicorn loggers to match
+for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
+    logger = logging.getLogger(logger_name)
+    logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(handler)
+    logger.setLevel(LOG_LEVEL)
+    logger.propagate = False
+
 app = FastAPI(**config)
 
 allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
