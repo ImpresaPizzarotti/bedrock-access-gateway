@@ -22,6 +22,9 @@ phases:
     - yum update -y
     - yum upgrade -y
 
+    # Using a containerd engine
+    - docker buildx create --name containerd --driver=docker-container --driver-opt default-load=true
+
     # DO not change the login into docker 
     - echo 'Logging into docker to prevent pull limits...'
     - docker login --username $DOCKERHUB_USERNAME --password $DOCKERHUB_PASS
@@ -68,9 +71,9 @@ phases:
     - cd src
     # - docker buildx create --use --name multiarch
     # - docker buildx build --push --platform linux/amd64,linux/arm64 -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
-    - docker buildx create --use --driver docker-container
-    - docker buildx build --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest . --load
-    # - docker build  --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
+    # - docker buildx build --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest . --load
+    - docker build  --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest --builder=containerd .
+    
   post_build:
     commands:
     - docker push $REPOSITORY_URI:$IMAGE_TAG
