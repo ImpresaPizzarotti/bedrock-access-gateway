@@ -8,6 +8,19 @@ env:
     DOCKERHUB_PASS: "/lw/dockerhub/password"
 
 phases:
+  install:
+    commands:
+      # Configuring Containerd image store
+      - echo "Configure Docker Daemon"
+      - mkdir -p /etc/docker
+      - "echo '{\n  \"features\": {\n    \"containerd-snapshotter\": true\n  }\n}' > /etc/docker/daemon.json"
+      - echo "Restart Docker Daemon"
+      - kill $(cat /var/run/docker.pid) && rm -rf /var/run/docker.pid
+      - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+      - timeout 20 sh -c "until docker info; do echo .; sleep 1; done"
+
+      # Creating the containerd builder
+      - docker buildx create --name containerd --driver=docker-container --driver-opt default-load=true
 
   pre_build:
     commands:
@@ -15,15 +28,12 @@ phases:
     - echo "CodeBuild environment information:"
     - uname -a
     - cat /etc/os-release
-    - echo "Docker version:"
-    - docker --version
+    - echo "Docker info:"
+    - docker info
 
-    # Trying to solve problem with kernel version updating the enviroment before building the image
-    - yum update -y
-    - yum upgrade -y
-
-    # Using a containerd engine
-    - docker buildx create --name containerd --driver=docker-container --driver-opt default-load=true
+    # # Trying to solve problem with kernel version updating the enviroment before building the image
+    # - yum update -y
+    # - yum upgrade -y
 
     # DO not change the login into docker 
     - echo 'Logging into docker to prevent pull limits...'
@@ -73,7 +83,7 @@ phases:
     # - docker buildx build --push --platform linux/amd64,linux/arm64 -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
     # - docker buildx build --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest . --load
     - docker build  --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest --builder=containerd .
-    
+
   post_build:
     commands:
     - docker push $REPOSITORY_URI:$IMAGE_TAG
