@@ -16,7 +16,7 @@ phases:
       - "echo '{\n  \"features\": {\n    \"containerd-snapshotter\": true\n  }\n}' > /etc/docker/daemon.json"
       - echo "Restart Docker Daemon"
       - kill $(cat /var/run/docker.pid) && rm -rf /var/run/docker.pid
-      - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlay2 &
+      - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlayfs &
       - timeout 20 sh -c "until docker info; do echo .; sleep 1; done"
 
       # Creating the containerd builder
@@ -81,6 +81,7 @@ phases:
     - cd src
     # - docker buildx create --use --name multiarch
     # - docker buildx build --push --platform linux/amd64,linux/arm64 -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
+    # - docker buildx use containerd
     # - docker buildx build --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest . --load
     - docker build  --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest --builder=containerd .
 
