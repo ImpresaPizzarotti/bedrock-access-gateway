@@ -10,6 +10,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 api_key_param = os.environ.get("API_KEY_PARAM_NAME")
 api_key_secret_arn = os.environ.get("API_KEY_SECRET_ARN")
 api_key_env = os.environ.get("API_KEY")
+
 if api_key_param:
     # For backward compatibility.
     # Please now use secrets manager instead.

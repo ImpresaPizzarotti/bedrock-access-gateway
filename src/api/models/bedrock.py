@@ -4,6 +4,7 @@ import logging
 import re
 import time
 from abc import ABC
+from collections import defaultdict
 from typing import AsyncIterable, Iterable, Literal
 
 import boto3
@@ -95,6 +96,7 @@ cr_inference_prefix = get_inference_region_prefix()
 # }
 
 ENCODER = tiktoken.get_encoding("cl100k_base")
+
 
 # Global mapping: Profile ID/ARN → Foundation Model ID
 # Handles both SYSTEM_DEFINED (cross-region) and APPLICATION profiles
