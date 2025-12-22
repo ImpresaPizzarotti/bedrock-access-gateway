@@ -88,5 +88,8 @@ phases:
   post_build:
     commands:
     - docker push $REPOSITORY_URI:$IMAGE_TAG
-    - docker push $REPOSITORY_URI:latest
+    - |
+      if [ "$BRANCH_NAME" == "master" ] && [ "$BRANCH_NAME" == "main" ]; then
+        docker push $REPOSITORY_URI:latest
+      fi
     - echo Build completed on `date`
