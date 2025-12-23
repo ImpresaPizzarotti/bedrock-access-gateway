@@ -1,11 +1,14 @@
 import json
 import os
+import logging
 from typing import Annotated
 
 import boto3
 from botocore.exceptions import ClientError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+
+logger = logging.getLogger(__name__)
 
 api_key_param = os.environ.get("API_KEY_PARAM_NAME")
 api_key_secret_arn = os.environ.get("API_KEY_SECRET_ARN")
@@ -40,5 +43,6 @@ security = HTTPBearer()
 def api_key_auth(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ):
+    logger.info(f"API Key: {api_key}, Credentials: {credentials.credentials}")
     if credentials.credentials != api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
