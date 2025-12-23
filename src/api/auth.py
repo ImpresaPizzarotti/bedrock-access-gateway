@@ -43,6 +43,6 @@ security = HTTPBearer()
 def api_key_auth(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
 ):
-    logger.info(f"API Key: {api_key}, Credentials: {credentials.credentials}")
+    # logger.debug(f"API Key: {api_key}, Credentials: {credentials.credentials}")
     if credentials.credentials != api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
