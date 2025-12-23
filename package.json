@@ -1,6 +1,6 @@
 {
   "name": "bedrock-access-gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "OpenAI-Compatible RESTful APIs for Amazon Bedrock",
   "directories": {
     "doc": "docs"
