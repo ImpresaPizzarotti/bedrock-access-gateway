@@ -10,34 +10,48 @@ env:
 phases:
   install:
     commands:
+      # Configuring Containerd image store
+      - echo "Configure Docker Daemon"
+      - mkdir -p /etc/docker
+      - "echo '{\n  \"features\": {\n    \"containerd-snapshotter\": true\n  }\n}' > /etc/docker/daemon.json"
+      - echo "Restart Docker Daemon"
+      - kill $(cat /var/run/docker.pid) && rm -rf /var/run/docker.pid
+      - nohup /usr/local/bin/dockerd --host=unix:///var/run/docker.sock --host=tcp://127.0.0.1:2375 --storage-driver=overlayfs &
+      - timeout 20 sh -c "until docker info; do echo .; sleep 1; done"
+
+      # Creating the containerd builder
+      - docker buildx create --name containerd --driver=docker-container --driver-opt default-load=true
+
+  pre_build:
+    commands:
+    # Debug
+    - echo "CodeBuild environment information:"
+    - uname -a
+    - cat /etc/os-release
+    - echo "Docker info:"
+    - docker info
+
+    # # Trying to solve problem with kernel version updating the enviroment before building the image
+    # - yum update -y
+    # - yum upgrade -y
+
     # DO not change the login into docker 
     - echo 'Logging into docker to prevent pull limits...'
     - docker login --username $DOCKERHUB_USERNAME --password $DOCKERHUB_PASS
-    # - echo $DOCKERHUB_USERNAME
-    # - echo $DOCKERHUB_PASS
-    # Install buildx to build multi-arch images
+
+    - echo $DOCKERHUB_USERNAME
+    - echo $DOCKERHUB_PASS
     # Testing pull rates limits, this should be avoided once we login into docker 
     # but a test doesn't hurt
     - echo 'Testing pull rate limits...'
     - TOKEN=$(curl "https://auth.docker.io/token?service=registry.docker.io&scope=repository:ratelimitpreview/test:pull" | jq -r .token)
     - echo 'Pull rate status <'$TOKEN'>'
 
-    - echo 'Installing buildx version...'
-    - export BUILDX_VERSION=$(curl --silent "https://api.github.com/repos/docker/buildx/releases/latest" |jq -r .tag_name)
-    - curl -JLO "https://github.com/docker/buildx/releases/download/$BUILDX_VERSION/buildx-$BUILDX_VERSION.linux-amd64"
-    - mkdir -p ~/.docker/cli-plugins
-    - mv "buildx-$BUILDX_VERSION.linux-amd64" ~/.docker/cli-plugins/docker-buildx
-    - chmod +x ~/.docker/cli-plugins/docker-buildx
-    - docker run --privileged --rm tonistiigi/binfmt --install arm64
-    # To install all the supported platforms:
-    # - docker run --privileged --rm tonistiigi/binfmt --install all
-
-  pre_build:
-    commands:
     - aws --version
 
-    # Image registry base uri DO NOT CHANGE, REPO_NAME is from ENV VARS
+    # Image registry base uri DO NOT CHANGE
     - REPOSITORY_URI=$(aws ecr describe-repositories --repository-names "$REPO_NAME" --query 'repositories[0].repositoryUri' --output text)
+    - echo 'REPOSITORY_URI <'$REPOSITORY_URI'>'
 
     # Getting the ECR token to push images DO NOT CHANGE
     - echo Logging in to Amazon ECR...
@@ -67,9 +81,15 @@ phases:
     - cd src
     # - docker buildx create --use --name multiarch
     # - docker buildx build --push --platform linux/amd64,linux/arm64 -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
-    - docker build  -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest .
+    # - docker buildx use containerd
+    # - docker buildx build --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest . --load
+    - docker build  --sbom=true -f ./Dockerfile_ecs -t $REPOSITORY_URI:$IMAGE_TAG -t $REPOSITORY_URI:latest --builder=containerd .
+
   post_build:
     commands:
     - docker push $REPOSITORY_URI:$IMAGE_TAG
-    - docker push $REPOSITORY_URI:latest
+    - |
+      if [ "$BRANCH_NAME" == "master" ] && [ "$BRANCH_NAME" == "main" ]; then
+        docker push $REPOSITORY_URI:latest
+      fi
     - echo Build completed on `date`

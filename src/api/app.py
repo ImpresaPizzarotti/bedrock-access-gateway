@@ -1,14 +1,16 @@
 import logging
-
+import os
+import sys
 import uvicorn
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from mangum import Mangum
+from api.tracing import setup_tracing, instrument_fastapi
 
 from api.routers import chat, embeddings, model
-from api.setting import API_ROUTE_PREFIX, DESCRIPTION, SUMMARY, TITLE, VERSION
+from api.setting import API_ROUTE_PREFIX, DESCRIPTION, SUMMARY, TITLE, VERSION, LOG_LEVEL
 
 config = {
     "title": TITLE,
@@ -17,15 +19,42 @@ config = {
     "version": VERSION,
 }
 
+# Set logging level base on LOG_LEVEL var
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    # level=logging.INFO,
+    level = LOG_LEVEL,
+    format="%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
+
+# Configure uvicorn loggers to match
+for logger_name in ["uvicorn", "uvicorn.access", "uvicorn.error"]:
+    logger = logging.getLogger(logger_name)
+    logger.handlers.clear()
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    ))
+    logger.addHandler(handler)
+    logger.setLevel(LOG_LEVEL)
+    logger.propagate = False
+
+setup_tracing()
 app = FastAPI(**config)
+instrument_fastapi(app)
+
+allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+origins_list = [origin.strip() for origin in allowed_origins.split(",")] if allowed_origins != "*" else ["*"]
+
+# Warn if CORS allows all origins
+if origins_list == ["*"]:
+    logging.warning("CORS is configured to allow all origins (*). Set ALLOWED_ORIGINS environment variable to restrict access.")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins_list,  # nosec - configurable via ALLOWED_ORIGINS env var
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,4 +90,5 @@ async def validation_exception_handler(request, exc):
 handler = Mangum(app)
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True)
+    port: int = int(os.getenv("PORT", "8080"))
+    uvicorn.run("app:app", host="0.0.0.0", port=port, reload=False)

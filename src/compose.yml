@@ -1,0 +1,60 @@
+services:
+  bedrock-access-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile_ecs
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${USERPROFILE}\.aws:/home/appuser/.aws:ro
+    environment:
+      # Tracing
+      - ENABLE_TRACING=true
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=bedrock-access-gateway
+      - AWS_PROFILE=${AWS_PROFILE:-default}
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - ENABLE_APPLICATION_INFERENCE_PROFILES=true
+      - INFERENCE_PROFILE_REGEX_FILTER=^paip-dev.*
+      # - LOG_LEVEL=debug
+      - API_KEY=bedrock
+      - PORT=8080
+    container_name: bedrock-access-gateway
+    restart: unless-stopped
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:v0.6.33
+    ports:
+      - "8081:8080"
+    # volumes:
+    #   - open-webui:/app/backend/data
+    environment:
+      - OPENAI_API_BASE_URL=http://bedrock-access-gateway:8080/api/v1
+      - OPENAI_API_KEY=bedrock
+      - RAG_OPENAI_API_BASE_URL=http://bedrock-access-gateway:8080/api/v1
+      - RAG_OPENAI_API_KEY=bedrock
+      - RAG_EMBEDDING_ENGINE=openai
+      - RAG_EMBEDDING_MODEL=arn:aws:bedrock:eu-west-1:487962084333:application-inference-profile/cadogiby4o5b
+      - WEBUI_AUTH=False
+      - OFFLINE_MODE=True
+      - DATABASE_POOL_SIZE="20"
+      - DATABASE_POOL_MAX_OVERFLOW="30"
+      - DATABASE_POOL_TIMEOUT="30"
+      - DATABASE_POOL_RECYCLE="3600"
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      - bedrock-access-gateway
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "8082:16686"  # Jaeger UI
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    container_name: jaeger
+    restart: unless-stopped
+# volumes:
+#   open-webui:
