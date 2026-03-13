@@ -42,7 +42,7 @@ class ImageUrl(BaseModel):
 
 
 class ImageContent(BaseModel):
-    type: Literal["image_url"] = "image"
+    type: Literal["image_url"] = "image_url"
     image_url: ImageUrl
 
 
@@ -183,7 +183,7 @@ class EmbeddingsRequest(BaseModel):
     input: str | list[str] | Iterable[int | Iterable[int]]
     model: str
     encoding_format: Literal["float", "base64"] = "float"
-    dimensions: int | None = None  # not used.
+    dimensions: int | None = None  # Used by Nova embeddings; ignored by other models.
     user: str | None = None  # not used.
 
 

@@ -111,6 +111,7 @@ TEMPERATURE_TOPP_CONFLICT_MODELS = {
     "claude-opus-4-5",
 }
 
+
 def list_bedrock_models(model_regex_filter: str = None, output_modality: str = "TEXT") -> dict:
     """Automatically getting a list of supported models.
     
@@ -462,12 +463,26 @@ class BedrockModel(BaseChatModel):
             message_id = self.generate_message_id()
             stream = response.get("stream")
             self.think_emitted = False
+            reasoning_tokens = 0
             async for chunk in self._async_iterate(stream):
-                args = {"model_id": chat_request.model,
-                        "message_id": message_id, "chunk": chunk}
+                # Accumulate reasoning tokens from delta chunks before processing
+                if "contentBlockDelta" in chunk:
+                    delta = chunk["contentBlockDelta"].get("delta", {})
+                    if "reasoningContent" in delta and "text" in delta["reasoningContent"]:
+                        reasoning_tokens += len(ENCODER.encode(delta["reasoningContent"]["text"]))
+
+                args = {"model_id": chat_request.model, "message_id": message_id, "chunk": chunk}
                 stream_response = self._create_response_stream(**args)
                 if not stream_response:
                     continue
+
+                # Patch reasoning tokens into the final usage chunk
+                if stream_response.usage and reasoning_tokens > 0:
+                    stream_response.usage.completion_tokens_details = CompletionTokensDetails(
+                        reasoning_tokens=reasoning_tokens,
+                        audio_tokens=0,
+                    )
+
 
                 logger.debug("Proxy response :" +
                              stream_response.model_dump_json())
@@ -751,6 +766,24 @@ class BedrockModel(BaseChatModel):
                 {"role": current_role, "content": current_content}
             )
 
+        # Bedrock Converse API requires conversations to end with a user message.
+        # Some models don't support "assistant message prefill".
+        # If the conversation ends with an assistant message (e.g., "continue response" scenario),
+        # add a user message asking to continue - but only for models in NO_ASSISTANT_PREFILL_MODELS.
+        if chat_request and reformatted_messages and reformatted_messages[-1]["role"] == "assistant":
+            # Resolve profile to underlying model for feature detection
+            resolved_model = self._resolve_to_foundation_model(chat_request.model)
+            model_lower = resolved_model.lower()
+
+            # Check if model is in the no-prefill list
+            if any(no_prefill_model in model_lower for no_prefill_model in NO_ASSISTANT_PREFILL_MODELS):
+                reformatted_messages.append({
+                    "role": "user",
+                    "content": [{"text": "Please continue your response from where you left off."}]
+                })
+                if DEBUG:
+                    logger.info(f"Added continuation prompt for {chat_request.model} - conversation ended with assistant message")
+
         # Add cachePoint to messages if enabled and supported
         if chat_request and reformatted_messages:
             if not self._supports_prompt_caching(chat_request.model):
@@ -889,8 +922,10 @@ class BedrockModel(BaseChatModel):
             }
 
             if additional_fields:
-                # Only set additionalModelRequestFields if there are actual fields to pass
-                args["additionalModelRequestFields"] = additional_fields
+                # Merge with existing additionalModelRequestFields (e.g., from reasoning_effort)
+                existing = args.get("additionalModelRequestFields", {})
+                existing.update(additional_fields)
+                args["additionalModelRequestFields"] = existing
 
                 # Extended thinking doesn't support both temperature and topP
                 # Remove topP to avoid validation error
@@ -1429,6 +1464,89 @@ class TitanEmbeddingsModel(BedrockEmbeddingsModel):
             input_tokens=response_body["inputTextTokenCount"],
         )
 
+class NovaEmbeddingsModel(BedrockEmbeddingsModel):
+    # Per https://docs.aws.amazon.com/nova/latest/userguide/embeddings-schema.html
+    VALID_DIMENSIONS = {256, 384, 1024, 3072}
+    DEFAULT_DIMENSION = 3072
+
+    def _parse_args(self, text: str, dimensions: int | None = None) -> dict:
+        dim = dimensions if dimensions is not None else self.DEFAULT_DIMENSION
+        return {
+            "taskType": "SINGLE_EMBEDDING",
+            "singleEmbeddingParams": {
+                # Nova supports 9 embeddingPurpose values; GENERIC_INDEX is the
+                # general-purpose default suitable for most retrieval use cases.
+                "embeddingPurpose": "GENERIC_INDEX",
+                "embeddingDimension": dim,
+                "text": {
+                    "truncationMode": "END",
+                    "value": text,
+                },
+            },
+        }
+
+    def embed(self, embeddings_request: EmbeddingsRequest) -> EmbeddingsResponse:
+        if isinstance(embeddings_request.input, str):
+            texts = [embeddings_request.input]
+        elif isinstance(embeddings_request.input, list):
+            if len(embeddings_request.input) == 0:
+                raise HTTPException(status_code=400, detail="Input list cannot be empty")
+            # Decode token arrays if needed
+            texts = []
+            for item in embeddings_request.input:
+                if isinstance(item, str):
+                    texts.append(item)
+                elif isinstance(item, int):
+                    texts.append(ENCODER.decode([item]))
+                elif isinstance(item, list):
+                    texts.append(ENCODER.decode(item))
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unsupported input item type: {type(item).__name__}. Expected str, int, or list of ints.",
+                    )
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported input type")
+
+        dimensions = embeddings_request.dimensions
+        # Validate dimensions once before the loop — it's constant across all texts
+        dim = dimensions if dimensions is not None else self.DEFAULT_DIMENSION
+        if dim not in self.VALID_DIMENSIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid dimensions {dim}. Must be one of {sorted(self.VALID_DIMENSIONS)}",
+            )
+
+        all_embeddings = []
+        total_tokens = 0
+
+        for idx, text in enumerate(texts):
+            response = self._invoke_model(
+                args=self._parse_args(text, dimensions),
+                model_id=embeddings_request.model,
+            )
+            response_body = json.loads(response.get("body").read())
+            if DEBUG:
+                logger.info("Bedrock response body keys: " + str(list(response_body.keys())))
+
+            # Response: {"embeddings": [{"embeddingType": "TEXT", "embedding": [...]}]}
+            embeddings_list = response_body.get("embeddings", [])
+            if not embeddings_list:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"No embeddings returned from Nova model for input[{idx}]",
+                )
+            all_embeddings.append(embeddings_list[0]["embedding"])
+            # Nova doesn't return token counts in the response; approximate with cl100k_base
+            total_tokens += len(ENCODER.encode(text))
+
+        return self._create_response(
+            embeddings=all_embeddings,
+            model=embeddings_request.model,
+            input_tokens=total_tokens,
+            encoding_format=embeddings_request.encoding_format,
+        )
+
 
 def get_embeddings_model(model_id: str) -> BedrockEmbeddingsModel:
     logger.debug("Supported embedding models %s", json.dumps(bedrock_embedding_model_list))
@@ -1440,6 +1558,8 @@ def get_embeddings_model(model_id: str) -> BedrockEmbeddingsModel:
             return CohereEmbeddingsModel()
         elif "titan" in model_name:
             return TitanEmbeddingsModel()
+        elif "nova" in model_name:
+            return NovaEmbeddingsModel()
     
     logger.error("Unsupported model id " + model_id)
     raise HTTPException(
